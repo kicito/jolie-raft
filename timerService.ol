@@ -1,6 +1,7 @@
 include "math.iol"
 include "runtime.iol"
 include "console.iol"
+include "time.iol"
 
 include "logger.ol"
 
@@ -14,7 +15,7 @@ inputPort internalIn {
 }
 
 outputPort internalOut{
-  Location: LOCAL_LOCATION
+  Location: LOCAL_PORT
   Interfaces: TimeoutServiceOutputInterface
 }
 
@@ -37,7 +38,7 @@ main {
     timeoutTicked@internalOut()()
 	}
 
-  // cancel(){
-
-  // }
+  [cancel(id)]{
+    nullProcess
+  }
 }

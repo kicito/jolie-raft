@@ -10,14 +10,14 @@ type eventMsg: void{
 
 interface LoggerIface{
     RequestResponse: 
-      log(anyType)(anyType),
+      logVar(anyType)(anyType),
       logEvent(eventMsg)(anyType)
 }
 
 service Logger{
   Interfaces: LoggerIface
   main{
-    [ log( req )( res ) {
+    [ logVar( req )( res ) {
       valueToPrettyString@StringUtils( req )( res );
       println@Console(res)()
     }]

@@ -8,9 +8,34 @@ include "timerInterface.iol"
 
 include "logger.ol"
 
+
+
+// interfaces
+inputPort myLocalport {
+  Location: LOCAL_PORT
+  Interfaces: TimeoutServiceOutputInterface
+}
+
+
+outputPort internalTimer {
+  Interfaces: TimeoutServiceInputInterface
+}
+
+
+inputPort raftInputPort {
+    Location: RAFT_PORT
+    Interfaces: RaftRPCInterface
+}
+
+outputPort raftOutputPort {
+    Protocol: sodep
+    Interfaces: RaftRPCInterface
+}
+
+
 type state:void{
     .id: serverId
-    .role: string
+    .role: string | void
     .persistent: void{
         /*
             latest term server has seen (init to 0 on first boot)
@@ -20,12 +45,15 @@ type state:void{
         /*
             candidateId that received vote in current term
         */
-        .votedFor: serverId
+        .votedFor: serverId | void
         
         /*
             log entries    
         */
-        .log: any
+        .logs: void{
+            .term: term
+            .entry: any
+        }
     }
 
     // volatile state
@@ -55,28 +83,11 @@ type state:void{
     // }
 }
 
-
-// // interfaces
-// inputPort myLocalport {
-//   Location: LOCAL_LOCATION
-//   Interfaces: TimeoutServiceOutputInterface
-// }
-
-
-outputPort internalTimer {
-  Interfaces: TimeoutServiceInputInterface
+type serverLogType: void{
+  state: state
+  desc?: anyType 
 }
 
-
-inputPort raftInputPort {
-    Location: RAFT_LOCATION
-    Interfaces: RaftRPCInterface
-}
-
-// outputPort raftOutputPort {
-//     Protocol: sodep
-//     Interfaces: RaftRPCInterface
-// }
 
 
 define embbedTimer{
@@ -89,10 +100,14 @@ define embbedTimer{
 }
 
 define initVar{
-
-    with(global.state.persistent){
+    with(global.state){
         with(.persistent){
             .currentTerm = 0
+            .votedFor = void
+            // with(.logs[0]){
+            //     .term = 0
+            //     .entry = void
+            // }
         }
 
         with(.volatile){
@@ -116,18 +131,23 @@ define initVar{
 */
 define election{
     scope (election){
-        global.state.currentTerm++;
-        global.state.votedFor = global.state.serverId;
+        global.state.persistent.currentTerm++;
+        global.state.persistent.votedFor = global.state.serverId;
 
         // reset timer
-
+        
         // preparing request
         with(RequestVoteRequest){
-            .term = global.state.currentTerm;
+            .term = global.state.persistent.currentTerm;
             .candidateId = global.state.serverId;
-            .lastLogIndex = global.state.lastLogIndex;
-            .lastLogTerm = global.state.lastLogTerm
+            .lastLogIndex = #global.state.persistent.logs;
+            if (is_defined(global.state.persistent.logs[#global.state.persistent.logs].term)){
+                .lastLogTerm = global.state.persistent.logs[#global.state.persistent.logs].term
+            }else{
+                .lastLogTerm = 0
+            }
         }
+
     }
 }
 
@@ -178,10 +198,8 @@ main{
         // else if (global.state.role == ROLE_CANDIDATE){
 
         // };
-        log@Logger(global.state)()
     }
     [RequestVote(req)(res){
         logEvent@Logger({.serverId = global.state.serverId, .event = "received request vote rpc", .desc = req})()
-
     }]
 }

@@ -8,8 +8,8 @@ init{
             println@Console("starting server " + i)();
             with( emb ) {
                 .filepath = "-C SERVER_ID=" + i + " "+
-                 "-C LOCAL_LOCATION=\"local://server_"+ i + "\" "+
-                 "-C RAFT_LOCATION=\"local://server_" + i + "_raft\" "+
+                 "-C LOCAL_PORT=\"local://server-"+ i + "\" "+
+                 "-C RAFT_PORT=\"local://server-" + i + "-raft\" "+
                  "-C TOTAL_SERVER=" + total_server + " "+
                  "server.ol";
                 .type = "Jolie"

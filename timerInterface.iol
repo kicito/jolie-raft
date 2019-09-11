@@ -1,5 +1,3 @@
-include "time.iol"
-
 type timeoutRequestType: void {
   .max: int
   .min: int
@@ -12,10 +10,11 @@ type timeoutResponseType: void {
 
 interface TimeoutServiceInputInterface {
     RequestResponse:
-        start( timeoutRequestType )( timeoutResponseType ),
-        cancel( void )( void )
+        start( timeoutRequestType )( timeoutResponseType )
     OneWay:
-      timeout( any )
+      timeout( any ),
+      cancel( int )
+
 }
 
 interface TimeoutServiceOutputInterface {
