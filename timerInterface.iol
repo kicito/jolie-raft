@@ -10,10 +10,10 @@ type timeoutResponseType: void {
 
 interface TimeoutServiceInputInterface {
     RequestResponse:
-        start( timeoutRequestType )( timeoutResponseType )
+      start( timeoutRequestType )( timeoutResponseType ),
+      cancel( int )( bool)
     OneWay:
-      timeout( any ),
-      cancel( int )
+      timeout( any )
 
 }
 

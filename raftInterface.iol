@@ -2,7 +2,7 @@ type index: int // commit index
 type serverId: int
 type term: int
 
-type RequestVoteRequest:void{
+type RequestVoteRequest:int{
     // Candidate's term
     term: term
 
@@ -17,7 +17,7 @@ type RequestVoteRequest:void{
     
 }
 
-type RequestVoteResponse:void{
+type RequestVoteResponse:int{
     // currentTerm, for candidate to update itself
     term: term
 
@@ -26,7 +26,7 @@ type RequestVoteResponse:void{
 }
 
 // Invoked by leader to replicate log entires; also used as heartbeat
-type AppendEntriesRequest:void{
+type AppendEntriesRequest:int{
     
     // leader's teem
     term: term
@@ -47,7 +47,7 @@ type AppendEntriesRequest:void{
     leaderCommit: index
 }
 
-type AppendEntriesResponse:void{
+type AppendEntriesResponse:int{
     // currentTerm, for leader to update itself
     term: term
 
@@ -58,7 +58,10 @@ type AppendEntriesResponse:void{
 
 
 interface RaftRPCInterface{
-    RequestResponse: 
-        AppendEntires(AppendEntriesRequest)(AppendEntriesResponse),
-        RequestVote(RequestVoteRequest)(RequestVoteResponse)
+    OneWay: 
+        appendEntires(AppendEntriesRequest),
+        appendEntiresAck(AppendEntriesResponse),
+        requestVote(RequestVoteRequest),
+        requestVoteAck(RequestVoteResponse)
+
 }

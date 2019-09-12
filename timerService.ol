@@ -38,7 +38,7 @@ main {
     timeoutTicked@internalOut()()
 	}
 
-  [cancel(id)]{
-    nullProcess
-  }
+  [cancel(id)(isSuccess){
+    cancelTimeout@Time( id )( isSuccess )
+  }]
 }

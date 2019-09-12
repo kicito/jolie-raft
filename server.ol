@@ -13,7 +13,7 @@ include "logger.ol"
 // interfaces
 inputPort myLocalport {
   Location: LOCAL_PORT
-  Interfaces: TimeoutServiceOutputInterface
+  Interfaces: TimeoutServiceOutputInterface, RaftRPCInterface
 }
 
 
@@ -28,7 +28,6 @@ inputPort raftInputPort {
 }
 
 outputPort raftOutputPort {
-    Protocol: sodep
     Interfaces: RaftRPCInterface
 }
 
@@ -100,23 +99,37 @@ define embbedTimer{
 }
 
 define initVar{
-    with(global.state){
-        with(.persistent){
-            .currentTerm = 0
-            .votedFor = void
-            // with(.logs[0]){
-            //     .term = 0
-            //     .entry = void
-            // }
-        }
-
-        with(.volatile){
-            .commitIndex = 0;
-            .lastApplied = 0
+    scope (initVar){
+        with(global.state){
+            with(.persistent){
+                .currentTerm = 0
+                .votedFor = void
+            }
+            with(.volatile){
+                .commitIndex = 0;
+                .lastApplied = 0
+            }
         }
     }
 }
 
+
+
+define broadcastRequestVoteRPC{
+    // send request to every server, expected requestVoteRequest is set from election procedure
+    logEvent@Logger({.serverId = global.state.serverId, .event="broadcast RequestVoteRPC", .desc = requestVoteRequest})()
+    for( i = 0, i < global.state.serverAmount, i++ ) {
+        if ( i != global.state.serverId){
+            stringReplaceReq = LOCAL_PORT;
+            stringReplaceReq.regex = string(global.state.serverId);
+            stringReplaceReq.replacement = "" + i;
+            replaceFirst@StringUtils( stringReplaceReq )( destinationLocation );
+            logEvent@Logger({.serverId = global.state.serverId, .event="sending request to port " + destinationLocation})();
+            raftOutputPort.location = destinationLocation
+            requestVote@raftOutputPort(requestVoteRequest)
+        }
+    }
+}
 
 /**
     election procedure do as following
@@ -131,13 +144,15 @@ define initVar{
 */
 define election{
     scope (election){
+        logEvent@Logger({.serverId = global.state.serverId, .event="attempt to start new election"})()
         global.state.persistent.currentTerm++;
         global.state.persistent.votedFor = global.state.serverId;
 
         // reset timer
         
         // preparing request
-        with(RequestVoteRequest){
+        requestVoteRequest = global.state.serverId;
+        with(requestVoteRequest){
             .term = global.state.persistent.currentTerm;
             .candidateId = global.state.serverId;
             .lastLogIndex = #global.state.persistent.logs;
@@ -146,8 +161,8 @@ define election{
             }else{
                 .lastLogTerm = 0
             }
-        }
-
+        };
+        broadcastRequestVoteRPC
     }
 }
 
@@ -180,7 +195,7 @@ init{
         println@Console("Please, specify server id and server amount")();
         exit
     } else {
-
+        logEvent@Logger({.serverId = global.state.serverId, .event="totalServer = " + global.state.serverAmount})();
         initVar;
         embbedTimer;
         logEvent@Logger({.serverId = global.state.serverId, .event = "server startup"})();
@@ -191,7 +206,8 @@ init{
 
 main{
     [timeoutTicked()()]{
-        // current role is follower, should turn to candidate
+        logEvent@Logger({.serverId = global.state.serverId, .event = "timeout Ticked"})()
+        // current role is follower, turn to candidate
         if ( global.state.role == ROLE_FOLLOWER){
             changeToCandidate
         } 
@@ -199,7 +215,8 @@ main{
 
         // };
     }
-    [RequestVote(req)(res){
-        logEvent@Logger({.serverId = global.state.serverId, .event = "received request vote rpc", .desc = req})()
-    }]
+    [requestVote(req)]{
+        logEvent@Logger({.serverId = global.state.serverId, .event = "receive requestVote RPC"})()
+        logVar@Logger(req)()
+    }
 }
