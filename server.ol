@@ -82,13 +82,6 @@ type state:void{
     // }
 }
 
-type serverLogType: void{
-  state: state
-  desc?: anyType 
-}
-
-
-
 define embbedTimer{
 
     with( emb ) {
