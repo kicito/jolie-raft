@@ -18,8 +18,9 @@ service Logger{
   Interfaces: LoggerIface
   main{
     [ logVar( req )( res ) {
-      valueToPrettyString@StringUtils( req )( res );
-      println@Console(res)()
+      nullProcess
+      // valueToPrettyString@StringUtils( req )( res );
+      // println@Console(res)()
     }]
     [ logEvent( req )( res ) {
       getJsonString@JsonUtils( req )( res );

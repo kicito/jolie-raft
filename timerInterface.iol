@@ -1,6 +1,7 @@
 type timeoutRequestType: void {
   .max: int
   .min: int
+  .message: string
 }
 
 type timeoutResponseType: void {
@@ -11,13 +12,12 @@ type timeoutResponseType: void {
 interface TimeoutServiceInputInterface {
     RequestResponse:
       start( timeoutRequestType )( timeoutResponseType ),
-      cancel( int )( bool)
+      cancel( long )( bool)
     OneWay:
       timeout( any )
-
 }
 
 interface TimeoutServiceOutputInterface {
     RequestResponse: 
-        timeoutTicked( void )(void)
+        timeoutTicked( string )(void)
 }

@@ -41,7 +41,7 @@ type AppendEntriesRequest:int{
     prevLogTerm: term
 
     // log entries to store (empty for heartbeat)
-    entires: any
+    entires?: any
 
     // leader's commitIndex
     leaderCommit: index

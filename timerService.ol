@@ -20,13 +20,14 @@ outputPort internalOut{
 }
 
 execution{ concurrent }
+
 main {
   [start( request )( res ) {
     random@Math()(delay);
 
     TimerReq = int(delay * (request.max - request.min)) + 1 + request.min;
     with(TimerReq){
-      .message="timeout"
+      .message=request.message
     };
     res.timeout = TimerReq;
 
@@ -35,7 +36,10 @@ main {
 
 
 	[timeout(msg)] {
-    timeoutTicked@internalOut()()
+    // valueToPrettyString@StringUtils( msg )( response )
+    // println@Console(response)();
+
+    timeoutTicked@internalOut(msg)()
 	}
 
   [cancel(id)(isSuccess){
