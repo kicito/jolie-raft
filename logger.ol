@@ -18,13 +18,18 @@ service Logger{
   Interfaces: LoggerIface
   main{
     [ logVar( req )( res ) {
-      nullProcess
-      // valueToPrettyString@StringUtils( req )( res );
-      // println@Console(res)()
+      // nullProcess
+      synchronized( logToken ) {
+        valueToPrettyString@StringUtils( req )( res );
+        println@Console(res)()
+      }
     }]
     [ logEvent( req )( res ) {
-      getJsonString@JsonUtils( req )( res );
-      println@Console(res)()
+      // nullProcess
+      synchronized( logToken ) {
+        getJsonString@JsonUtils( req )( res );
+        println@Console(res)()
+      }
     }]
   }
 }

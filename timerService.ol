@@ -16,30 +16,49 @@ inputPort internalIn {
 
 outputPort internalOut{
   Location: LOCAL_PORT
+  Protocol: sodep
   Interfaces: TimeoutServiceOutputInterface
 }
 
 execution{ concurrent }
 
-main {
-  [start( request )( res ) {
-    random@Math()(delay);
+init{
+  global.broadcastTime = int(BROADCAST_TIME)
 
-    TimerReq = int(delay * (request.max - request.min)) + 1 + request.min;
+  global.electionInterval.min = double(global.broadcastTime*2)
+  global.electionInterval.max = double(global.broadcastTime*3)
+}
+
+main {
+  [startElectionTimer( request )( res ) {
+    random@Math()(delay);
+    TimerReq = int(global.electionInterval.min + delay / (1.0 / double(global.electionInterval.max - global.electionInterval.min + 1)) + 1);
     with(TimerReq){
-      .message=request.message
+      .message = "ELECTION"
     };
-    res.timeout = TimerReq;
+    res.param = TimerReq;
+
+    scheduleTimeout@Time( TimerReq )( res.id )
+  }]
+
+  [startHeartbeatTimer( request )( res ) {
+    TimerReq = global.broadcastTime;
+    with(TimerReq){
+      .message = "HEARTBEAT"
+    };
+    res.param = TimerReq;
 
     scheduleTimeout@Time( TimerReq )( res.id )
   }]
 
 
 	[timeout(msg)] {
-    // valueToPrettyString@StringUtils( msg )( response )
-    // println@Console(response)();
-
-    timeoutTicked@internalOut(msg)()
+    // logVar@Logger(msg)()
+    if(msg == "ELECTION"){
+      electionTimeoutTicked@internalOut(msg)
+    }else if (msg == "HEARTBEAT"){
+      heartbeatTimeoutTicked@internalOut(msg)
+    }
 	}
 
   [cancel(id)(isSuccess){

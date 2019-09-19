@@ -2,6 +2,12 @@ type index: int // commit index
 type serverId: int
 type term: int
 
+type logEntry: int{
+    .index: index
+    .term: term
+    .command: any
+}
+
 type RequestVoteRequest:int{
     // Candidate's term
     term: term
@@ -41,7 +47,7 @@ type AppendEntriesRequest:int{
     prevLogTerm: term
 
     // log entries to store (empty for heartbeat)
-    entires?: any
+    entires?: logEntry
 
     // leader's commitIndex
     leaderCommit: index
@@ -63,5 +69,4 @@ interface RaftRPCInterface{
         appendEntiresAck(AppendEntriesResponse),
         requestVote(RequestVoteRequest),
         requestVoteAck(RequestVoteResponse)
-
 }

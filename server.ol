@@ -4,6 +4,7 @@ include "runtime.iol"
 include "constants.iol"
 
 include "raftInterface.iol"
+include "raftClientInterface.iol"
 
 include "logger.ol"
 
@@ -11,8 +12,9 @@ include "timerInterface.iol"
 
 
 // interfaces
-inputPort myLocalport {
+inputPort myLocalPort {
   Location: LOCAL_PORT
+  Protocol: sodep
   Interfaces: TimeoutServiceOutputInterface, RaftRPCInterface
 }
 
@@ -24,13 +26,20 @@ outputPort internalTimer {
 
 inputPort raftInputPort {
     Location: RAFT_PORT
+    Protocol: sodep
     Interfaces: RaftRPCInterface
 }
 
 outputPort raftOutputPort {
+    Protocol: sodep
     Interfaces: RaftRPCInterface
 }
 
+inputPort clientPort {
+    Location: CLIENT_PORT
+    Protocol: http
+    Interfaces: ClientRaftRPCInterface
+}
 
 type state:void{
     .id: serverId
@@ -49,10 +58,7 @@ type state:void{
         /*
             log entries    
         */
-        .logs: void{
-            .term: term
-            .entry: any
-        }
+        .logs: logEntry
     }
 
     // volatile state
@@ -82,10 +88,11 @@ type state:void{
     // }
 }
 
-define embbedTimer{
+define embedTimer{
 
     with( emb ) {
-        .filepath = "-C LOCAL_LOCATION=\"local://server" + global.state.serverId + "\" timerService.ol";
+        .filepath = "-C LOCAL_LOCATION=\"local://server" + global.state.serverId + "\" " + 
+         "-C BROADCAST_TIME=" + global.state.broadcastTime + " timerService.ol";
         .type = "Jolie"
     };
     loadEmbeddedService@Runtime( emb )( internalTimer.location )
@@ -103,71 +110,89 @@ define initVar{
                 .commitIndex = 0;
                 .lastApplied = 0
             }
-            global.state.candidate.grantCount =0      
         }
         for ( i = 0, i < global.state.serverAmount, i++){
             if ( i != global.state.serverId){
                 stringReplaceReq = LOCAL_PORT;
-                stringReplaceReq.regex = string(global.state.serverId);
-                stringReplaceReq.replacement = "" + i;
+                stringReplaceReq.regex = "800" + string(global.state.serverId);
+                stringReplaceReq.replacement = "800" + i;
                 replaceFirst@StringUtils( stringReplaceReq )( destinationLocation );
                 with(global.state){
                     .servers[i].location = destinationLocation
                 }
             }
         }
+        logVar@Logger(global.state)()
     }
 }
 
 define initLeaderVar{
     undef(global.state.volatile.leader)
+
+    global.state.leaderId = global.state.serverId
+
     for( i = 0, i < #global.state.servers, i++ ) {
         if (is_defined(global.state.servers[i].location)){
             with(global.state.volatile.leader.server[i]){
-                .nextIndex = global.state.volatile.lastApplied - 1;
+                .nextIndex = global.state.volatile.lastApplied + 1;
                 .matchIndex = 0
             }
         }
     }
 }
 
-define startElectionTimer{
-    // Choose election timeouts randomly in [T, 2T]
-    synchronized (electionTimerToken){
-        if (is_defined(global.state.internal.electionTimerId)){
-            throw (TIME_NOT_CANCELED, {.message= "from server " + global.state.serverId})
-        }
-        start@internalTimer({.min = global.state.broadcastTime, .max = global.state.broadcastTime*2, .message="Election"})(res);
-        logEvent@Logger({.serverId = global.state.serverId, .event = "start election timeout", .desc.timeout = res.timeout, .desc.id = res.id})()
-        global.state.internal.electionTimerId = res.id
-    }
-}
 
-define resetElectionTimer{
-    synchronized (electionTimerToken){
-        cancel@internalTimer(global.state.internal.electionTimerId)(res);
-        logEvent@Logger({.serverId = global.state.serverId, .event="reset election timeout of id " + global.state.internal.electionTimerId + " result: " + res})();
+define unDefineElectionTimer{
+    synchronized(electionTimerToken){
         undef(global.state.internal.electionTimerId)
     }
 }
 
-define startHeartbeatTimer{
-    // Choose heartbeat timeouts T/3
-    synchronized (heartbeatTimerToken){
-        if (is_defined(global.state.internal.heartBeatTimerId)){
-            throw (TIME_NOT_CANCELED)
-        }
-        start@internalTimer({.min = global.state.broadcastTime/3, .max = global.state.broadcastTime/3, .message="Heartbeat"})(res);
-        logEvent@Logger({.serverId = global.state.serverId, .event = "start heartbeat timeout", .desc.timeout = res.timeout, .desc.id = res.id})()
-        global.state.internal.heartBeatTimerId = res.id
+define startElectionTimer{
+    // Choose election timeouts randomly in [T, 2T]
+    if (is_defined(global.state.internal.electionTimerId)){
+        throw (TIME_NOT_CANCELED, {.message= "electionTimeout from server " + global.state.serverId + " with id " + global.state.internal.electionTimerId})
+    }
+    synchronized(eTimerToken){
+        startElectionTimer@internalTimer()(electTimeoutRes);
+        logEvent@Logger({.serverId = global.state.serverId, .event = "start election timeout", .desc.timeout = electTimeoutRes.param, .desc.id = electTimeoutRes.id})()
+        global.state.internal.electionTimerId = electTimeoutRes.id
     }
 }
 
-define resetHeartbeatTimer{
-    synchronized (heartbeatTimerToken){
-        cancel@internalTimer(global.state.internal.heartBeatTimerId)(res);
-        logEvent@Logger({.serverId = global.state.serverId, .event="reset heartbeat timeout of id " + global.state.internal.heartBeatTimerId + " result: " + res})();
+
+define resetElectionTimer{
+    if (is_defined(global.state.internal.electionTimerId)){
+        synchronized(eTimerToken){
+            cancel@internalTimer(global.state.internal.electionTimerId)(cancelETimeoutRes);
+            logEvent@Logger({.serverId = global.state.serverId, .event="reset election timeout of id " + global.state.internal.electionTimerId + " result: " + cancelETimeoutRes})();
+            unDefineElectionTimer
+        }
+    }
+}
+
+
+define unDefineHeartbeatTimer{
+    synchronized(heartbeatTimerToken){
         undef(global.state.internal.heartBeatTimerId)
+    }
+}
+
+define startHeartbeatTimer{
+    if (is_defined(global.state.internal.heartBeatTimerId)){
+        throw (TIME_NOT_CANCELED, {.message= "electionTimeout from server " + global.state.serverId})
+    }
+    startHeartbeatTimer@internalTimer()(hbTimeoutRes);
+
+    logEvent@Logger({.serverId = global.state.serverId, .event = "start heartbeat timeout", .desc.timeout = hbTimeoutRes.param, .desc.id = hbTimeoutRes.id})()
+    global.state.internal.heartBeatTimerId = hbTimeoutRes.id
+}
+
+define resetHeartbeatTimer{
+    if (is_defined(global.state.internal.heartBeatTimerId)){
+        cancel@internalTimer(global.state.internal.heartBeatTimerId)(cancelHBTimeoutRes);
+        logEvent@Logger({.serverId = global.state.serverId, .event="reset heartbeat timeout of id " + global.state.internal.heartBeatTimerId + " result: " + cancelHBTimeoutRes})();
+        unDefineHeartbeatTimer
     }
 }
 
@@ -190,7 +215,32 @@ define broadcastAppendEntriesRPC{
     logEvent@Logger({.serverId = global.state.serverId, .event="broadcast AppendEntires", .desc = requestVoteRequest})()
     for( i = 0, i < #global.state.servers, i++ ) {
         if (is_defined(global.state.servers[i].location)){
-            logEvent@Logger({.serverId = global.state.serverId, .event="sending request to port " + global.state.servers[i].location})();
+            logEvent@Logger({.serverId = global.state.serverId, .event="sending AppendEntires request to port " + global.state.servers[i].location})();
+
+            logVar@Logger(global.state.volatile.leader.server[i])();
+
+            // println@Console("last log index = " + global.state.persistent.logs[#global.state.persistent.logs - 1].index + " server next index = " + global.state.volatile.leader.server[i].nextIndex + " log no = " + #global.state.persistent.logs)()
+            
+
+            if(is_defined(global.state.persistent.logs[#global.state.persistent.logs - 1])){
+                // check that it should include log entries
+                if ( global.state.persistent.logs[#global.state.persistent.logs - 1].index >= global.state.volatile.leader.server[i].nextIndex ){
+                    // println@Console(global.state.persistent.logs[global.state.volatile.leader.server[i].nextIndex - 1].index)()
+                    // println@Console(global.state.persistent.logs[global.state.volatile.leader.server[i].nextIndex - 1].term)()
+                    // println@Console(global.state.persistent.logs[global.state.volatile.leader.server[i].nextIndex - 1].command)()
+                    // logVar@Logger(global.state.persistent.logs[global.state.volatile.leader.server[i].nextIndex - 1])()
+                    // include log at server[i].nextIndex to the request
+                    appendEntiresRequest.entires = global.state.persistent.logs[global.state.volatile.leader.server[i].nextIndex - 1].index;
+                    with(appendEntiresRequest.entires){
+                        .index = int(global.state.persistent.logs[global.state.volatile.leader.server[i].nextIndex - 1].index);
+                        .term = global.state.persistent.logs[global.state.volatile.leader.server[i].nextIndex - 1].term;
+                        .command = global.state.persistent.logs[global.state.volatile.leader.server[i].nextIndex - 1].command
+                    }
+                    // logVar@Logger(appendEntiresRequest.entires)();
+                    // logEvent@Logger({.serverId = global.state.serverId, .event="embedding log entry to request", .desc = appendEntiresRequest.entires})()
+                }
+            };
+
             raftOutputPort.location = global.state.servers[i].location;
             appendEntires@raftOutputPort(appendEntiresRequest)
         }
@@ -209,19 +259,19 @@ define broadcastAppendEntriesRPC{
         voteGranted: bool
     }
 
-    and variable req.candidateId has candidate's serverId
+    and variable rvReq.candidateId has candidate's serverId
 */
 define responseRequestVoteRPC{
-    logEvent@Logger({.serverId = global.state.serverId, .event="reply RequestVoteRPC to serverId " + req.candidateId })()
+    logEvent@Logger({.serverId = global.state.serverId, .event="reply RequestVoteRPC to serverId " + rvReq.candidateId + " @" + global.state.servers[rvReq.candidateId].location })()
 
-    raftOutputPort.location = global.state.servers[req.candidateId].location;
+    raftOutputPort.location = global.state.servers[rvReq.candidateId].location;
     requestVoteAck@raftOutputPort(ackRequest)
 }
 
 
 /**
     implementation of behavior when receiving reqeustVote 
-    assume the variable req is 
+    assume the variable rvReq is 
 
     type RequestVoteRequest:int{
         // Candidate's term
@@ -245,21 +295,34 @@ define requestVoteHandler{
         ackRequest.term = global.state.persistent.currentTerm;
 
         // logVar@Logger(global.state.persistent)()
-        // logVar@Logger(req)()
+        // logVar@Logger(rvReq)()
 
         // denies vote to more complete log
         //(lastTermV > lastTermC) ||(lastTermV == lastTermC) && (lastIndexV > lastIndexC)
-        if ((global.state.persistent.currentTerm > req.lastLogTerm) || 
+        if ((global.state.persistent.currentTerm > rvReq.lastLogTerm) || 
                 (
-                    global.state.persistent.currentTerm == req.lastLogTerm && 
-                    global.state.persistent.lastApplied > req.lastLogIndex
+                    global.state.persistent.currentTerm == rvReq.lastLogTerm && 
+                    global.state.volatile.lastApplied > rvReq.lastLogIndex
                 )){
             ackRequest.voteGranted = false
         } else {
             ackRequest.voteGranted = true
         }
         // sending ack back to candidate
-        responseRequestVoteRPC
+        if (ackRequest.voteGranted != true){
+            logEvent@Logger({.serverId = global.state.serverId, .event="decline requestVote", 
+                .desc.self.currentTerm=global.state.persistent.currentTerm, 
+                .desc.self.lastApplied=global.state.volatile.lastApplied,
+                .desc.req.lastLogTerm=rvReq.lastLogTerm,
+                .desc.req.lastLogIndex=rvReq.lastLogIndex
+            })()
+            responseRequestVoteRPC
+
+        }else{
+            responseRequestVoteRPC | startElectionTimer
+
+        }
+
     }
 }
 
@@ -301,27 +364,32 @@ define election{
 
 define heartbeat{
     // broadcast AppendEntires with empty entries
-    scope (heartbeat){
-        appendEntiresRequest = global.state.serverId;
-        with(appendEntiresRequest){
-            .term = global.state.persistent.currentTerm;
-            .leaderId = global.state.serverId;
-            
-            if (global.state.volatile.lastApplied == 0 ){
-                .prevLogIndex = 0
-            }else{
-                .prevLogIndex = global.state.volatile.lastApplied - 1
-            }
-            .leaderCommit = global.state.volatile.commitIndex
 
-            if (is_defined(global.state.persistent.logs[global.state.volatile.lastApplied - 1].term)){
-                .prevLogTerm = global.state.persistent.logs[global.state.volatile.lastApplied - 1].term
-            } else {
-                .prevLogTerm = 0
-            }
+    logVar@Logger(global.state.volatile.leader)();
+    appendEntiresRequest = global.state.serverId;
+    with(appendEntiresRequest){
+        .term = global.state.persistent.currentTerm;
+        .leaderId = global.state.serverId;
+        
+        if (global.state.volatile.lastApplied == 0 ){
+            .prevLogIndex = 0
+        }else{
+            .prevLogIndex = global.state.volatile.lastApplied - 1
+        };
+        .leaderCommit = global.state.volatile.commitIndex;
+
+        logVar@Logger(global.state.persistent.logs)()
+        logVar@Logger(global.state.volatile)()
+
+        if (is_defined(global.state.persistent.logs[global.state.volatile.lastApplied - 1].term)){
+            .prevLogTerm = global.state.persistent.logs[global.state.volatile.lastApplied - 1].term
+        } else {
+            .prevLogTerm = 0
         }
-        broadcastAppendEntriesRPC
-    }
+    };
+    logVar@Logger(appendEntiresRequest)();
+
+    broadcastAppendEntriesRPC
 }
 
 define changeToCandidate{
@@ -329,7 +397,9 @@ define changeToCandidate{
     synchronized( roleToken ) {
         global.state.role = ROLE_CANDIDATE
     }
+    global.state.candidate.grantCount = 0
 }
+
 
 define changeToFollower{
     logEvent@Logger({.serverId = global.state.serverId, .event = "turning to follower"})()
@@ -366,7 +436,7 @@ init{
     } else {
         logEvent@Logger({.serverId = global.state.serverId, .event = "totalServer = " + global.state.serverAmount})();
         initVar;
-        embbedTimer;
+        embedTimer;
         logEvent@Logger({.serverId = global.state.serverId, .event = "server startup"})();
         changeToFollower;
         startElectionTimer
@@ -376,37 +446,47 @@ init{
 }
 
 main{
-    [timeoutTicked()()]{
-        logEvent@Logger({.serverId = global.state.serverId, .event = "timeout Ticked"})()
-        // current role is follower, turn to candidate
-        if ( global.state.role == ROLE_FOLLOWER){
-            resetElectionTimer;
-            changeToCandidate;
-            election | startElectionTimer
-        } else if (global.state.role == ROLE_CANDIDATE){
-            // start a new election
-            resetElectionTimer;
-            election | startElectionTimer
-        } else if (global.state.role == ROLE_LEADER){
-            resetHeartbeatTimer;
-            heartbeat | startHeartbeatTimer
-        } else {
-            throw (INVALID_ROLE, {.exceptionMessage = "server is not in valid role " + global.state.role})
+    [electionTimeoutTicked(timeoutMsg)]{
+        synchronized(handlerToken){
+            logEvent@Logger({.serverId = global.state.serverId, .event = "eletion ticked, current role " + global.state.role})();
+            unDefineElectionTimer
+            // current role is follower, turn to candidate
+            if ( global.state.role == ROLE_FOLLOWER ){
+                changeToCandidate;
+                election | startElectionTimer
+            } else if (global.state.role == ROLE_CANDIDATE){
+                // start a new election
+                election | startElectionTimer
+            } else {
+                throw (INVALID_ROLE, {.exceptionMessage = "server is not in valid role " + global.state.role})
+            }
         }
     }
 
-    [requestVote(req)]{
-        logEvent@Logger({.serverId = global.state.serverId, .event = "receive requestVote RPC"})()
-        resetElectionTimer;
-        requestVoteHandler;
-        startElectionTimer
+    [heartbeatTimeoutTicked(timeoutMsg)]{
+        synchronized(handlerToken){
+            logEvent@Logger({.serverId = global.state.serverId, .event = "heartbeat ticked, current role " + global.state.role})();
+            unDefineHeartbeatTimer;
+            if (global.state.role == ROLE_LEADER){
+                heartbeat | startHeartbeatTimer
+            } else {
+                throw (INVALID_ROLE, {.exceptionMessage = "server is not in valid role " + global.state.role})
+            }
+        }
     }
 
-    [requestVoteAck(req)]{
-        synchronized(requestVoteAckToken){
+    [requestVote(rvReq)]{
+        synchronized(handlerToken){
+            logEvent@Logger({.serverId = global.state.serverId, .event = "receive requestVote RPC"})();
+            resetElectionTimer;
+            requestVoteHandler
+        }
+    }
+
+    [requestVoteAck(rvAckreq)]{
+        synchronized(handlerToken){
             logEvent@Logger({.serverId = global.state.serverId, .event = "receive requestVoteAck RPC"})()
-            logVar@Logger(req)()
-            if (req.voteGranted == true){
+            if (rvAckreq.voteGranted == true){
 
                 global.state.candidate.grantCount++
 
@@ -419,39 +499,77 @@ main{
         }
     }
 
-    [appendEntires(req)]{
-        logEvent@Logger({.serverId = global.state.serverId, .event = "receive appendEntries RPC"})();
+    [appendEntires(aeReq)]{
+        synchronized(handlerToken){
+            logEvent@Logger({.serverId = global.state.serverId, .event = "receive appendEntries RPC"})();
 
-        ackRequest = global.state.serverId
-        logVar@Logger(req)()
+            ackRequest = global.state.serverId;
 
 
-        if (req.term == global.state.persistent.currentTerm ){
-            // step-down to follower when it is a candidate
-            if (global.state.role == ROLE_CANDIDATE){
-                changeToFollower
+            if (aeReq.term == global.state.persistent.currentTerm ){
+                // step-down to follower when it is a candidate
+                if (global.state.role == ROLE_CANDIDATE){
+                    resetElectionTimer;
+                    changeToFollower
+                }
+            } else {
+                // update current term
+                synchronized(currentTermToken){
+                    global.state.persistent.currentTerm = aeReq.term
+                }
             }
+
+
             synchronized(leaderToken){
-                global.state.leader = req.leaderId
+                global.state.leaderId = aeReq.leaderId
             }
-        } else {
-            // update current term
-            synchronized(currentTermToken){
-                global.state.persistent.currentTerm = req.term
+
+            // stale term
+            if (aeReq.term < global.state.persistent.currentTerm ){
+                ackRequest.success = false
+                ackRequest.term = global.state.persistent.currentTerm
+            } 
+            if (is_defined(aeReq.entires)){
+                println@Console("received log entry")()
+                logVar@Logger(aeReq.entires)()
             }
+            // else if (){
+            //     // Reject if log doesn't contain a matching previous entry.
+
+            // }
+
+            resetElectionTimer;
+            startElectionTimer
         }
-
-        // stale term
-        if (req.term < global.state.persistent.currentTerm ){
-            ackRequest.success = false
-            ackRequest.term = global.state.persistent.currentTerm
-        } 
-        // else if (){
-        //     // Reject if log doesn't contain a matching previous entry.
-
-        // }
-
-        resetElectionTimer;
-        startElectionTimer
     }
+
+    [add(addReq)(addRes){
+        synchronized(handlerToken){
+            logVar@Logger(addReq)()
+            // if the server is not leader, send redirection
+            if (!is_defined(global.state.leaderId)){
+                addRes.success = false;
+                addRes.message = "no leader registered"
+            } else if(global.state.leaderId != global.state.serverId){
+                addRes.success = false;
+                addRes.message = "redirect to server " + global.state.leaderId
+            } else {
+                addRes.success = true;
+                addRes.message = "appending value " + addReq.value + " to system";
+                totalLogAmt = #global.state.persistent.logs
+                println@Console("current log entries = " + #global.state.persistent.logs)()
+                with(global.state.persistent){
+                    .logs[totalLogAmt].index = global.state.volatile.lastApplied + 1;
+                    .logs[totalLogAmt].term = global.state.persistent.currentTerm;
+                    .logs[totalLogAmt].command = addReq.value
+                }
+                println@Console("current log entries = " + #global.state.persistent.logs)()
+                logVar@Logger(global.state.persistent.logs[totalLogAmt])()
+
+                global.state.volatile.lastApplied++
+
+            }
+            logVar@Logger(addRes)()
+        }
+    }]
 }

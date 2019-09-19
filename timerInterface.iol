@@ -1,23 +1,19 @@
-type timeoutRequestType: void {
-  .max: int
-  .min: int
-  .message: string
-}
-
 type timeoutResponseType: void {
   .id: long
-  .timeout: int
+  .param: any
 }
 
 interface TimeoutServiceInputInterface {
     RequestResponse:
-      start( timeoutRequestType )( timeoutResponseType ),
+      startElectionTimer( void )( timeoutResponseType ),
+      startHeartbeatTimer( void )( timeoutResponseType ),
       cancel( long )( bool)
     OneWay:
       timeout( any )
 }
 
 interface TimeoutServiceOutputInterface {
-    RequestResponse: 
-        timeoutTicked( string )(void)
+    OneWay: 
+        electionTimeoutTicked( any ),
+        heartbeatTimeoutTicked( any )
 }
